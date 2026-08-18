@@ -1,0 +1,9 @@
+import zipfile
+
+zip_file = "rps.zip"          # Name of your ZIP file
+extract_to = "./rps"          # Folder to extract into
+
+with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+    zip_ref.extractall(extract_to)
+
+print("ZIP file extracted successfully!")
