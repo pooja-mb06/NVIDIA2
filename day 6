@@ -1,0 +1,252 @@
+pip install transformers datasets torch accelerate scikit-learn
+# ==========================================
+# BERT Sentiment Analysis using Hugging Face
+# ==========================================
+
+import numpy as np
+import torch
+
+from datasets import load_dataset
+from transformers import (
+    BertTokenizer,
+    BertForSequenceClassification,
+    Trainer,
+    TrainingArguments,
+    pipeline
+)
+
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+
+# ==========================================
+# Check GPU
+# ==========================================
+
+print("=" * 50)
+print("PyTorch Version:", torch.__version__)
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+print("Using Device:", device)
+
+if device == "cuda":
+    print("GPU:", torch.cuda.get_device_name(0))
+
+print("=" * 50)
+
+# ==========================================
+# Load Dataset
+# ==========================================
+
+print("\nLoading IMDb Dataset...")
+
+dataset = load_dataset("imdb")
+
+print(dataset)
+
+# ==========================================
+# Reduce Dataset (for quick training)
+# ==========================================
+
+train_dataset = dataset["train"].shuffle(seed=42).select(range(5000))
+test_dataset = dataset["test"].shuffle(seed=42).select(range(1000))
+
+# ==========================================
+# Load Tokenizer
+# ==========================================
+
+print("\nLoading BERT Tokenizer...")
+
+tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+
+# ==========================================
+# Tokenization Function
+# ==========================================
+
+def tokenize_function(example):
+    return tokenizer(
+        example["text"],
+        padding="max_length",
+        truncation=True,
+        max_length=128
+    )
+
+print("\nTokenizing Dataset...")
+
+train_dataset = train_dataset.map(tokenize_function, batched=True)
+test_dataset = test_dataset.map(tokenize_function, batched=True)
+
+# ==========================================
+# Format Dataset
+# ==========================================
+
+train_dataset.set_format(
+    type="torch",
+    columns=["input_ids", "attention_mask", "label"]
+)
+
+test_dataset.set_format(
+    type="torch",
+    columns=["input_ids", "attention_mask", "label"]
+)
+
+# ==========================================
+# Load BERT Model
+# ==========================================
+
+print("\nLoading Pretrained BERT Model...")
+
+model = BertForSequenceClassification.from_pretrained(
+    "bert-base-uncased",
+    num_labels=2
+)
+
+# ==========================================
+# Evaluation Metrics
+# ==========================================
+
+def compute_metrics(eval_pred):
+
+    predictions, labels = eval_pred
+
+    predictions = np.argmax(predictions, axis=1)
+
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        labels,
+        predictions,
+        average="binary"
+    )
+
+    accuracy = accuracy_score(labels, predictions)
+
+    return {
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
+
+# ==========================================
+# Training Arguments
+# ==========================================
+
+training_args = TrainingArguments(
+
+    output_dir="./bert_results",
+
+    eval_strategy="epoch",
+
+    save_strategy="epoch",
+
+    learning_rate=2e-5,
+
+    per_device_train_batch_size=8,
+
+    per_device_eval_batch_size=8,
+
+    num_train_epochs=2,
+
+    weight_decay=0.01,
+
+    logging_steps=100,
+
+    load_best_model_at_end=True,
+
+    report_to="none"
+)
+
+# ==========================================
+# Trainer
+# ==========================================
+
+trainer = Trainer(
+
+    model=model,
+
+    args=training_args,
+
+    train_dataset=train_dataset,
+
+    eval_dataset=test_dataset,
+
+    compute_metrics=compute_metrics
+)
+
+# ==========================================
+# Train Model
+# ==========================================
+
+print("\nStarting Training...\n")
+
+trainer.train()
+
+# ==========================================
+# Evaluate
+# ==========================================
+
+print("\nEvaluating Model...\n")
+
+results = trainer.evaluate()
+
+print(results)
+
+# ==========================================
+# Save Model
+# ==========================================
+
+print("\nSaving Model...\n")
+
+trainer.save_model("bert_sentiment_model")
+
+tokenizer.save_pretrained("bert_sentiment_model")
+
+print("Model Saved Successfully")
+
+# ==========================================
+# Load Saved Model
+# ==========================================
+
+classifier = pipeline(
+
+    "sentiment-analysis",
+
+    model="bert_sentiment_model",
+
+    tokenizer="bert_sentiment_model",
+
+    device=0 if torch.cuda.is_available() else -1
+)
+
+# ==========================================
+# Test Custom Sentences
+# ==========================================
+
+texts = [
+
+    "This movie is fantastic. I loved it.",
+
+    "Worst movie ever made.",
+
+    "The acting was average.",
+
+    "Excellent direction and amazing screenplay.",
+
+    "I will never watch this again."
+]
+
+print("\nPredictions\n")
+
+for sentence in texts:
+
+    prediction = classifier(sentence)[0]
+
+    print("-" * 60)
+
+    print("Sentence :", sentence)
+
+    print("Prediction :", prediction["label"])
+
+    print("Confidence :", round(prediction["score"] * 100, 2), "%")
+
+print("-" * 60)
+
+print("\nCompleted Successfully")
